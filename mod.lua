@@ -13,7 +13,7 @@ function data()
                     role = "CREATOR",
                 }
             },
-            version = "1.3.0",
+            version = "1.3.4",
         },
     }
 end
