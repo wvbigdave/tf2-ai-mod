@@ -7,7 +7,7 @@
 
 <div align="center">
 
-![TF2](https://img.shields.io/badge/Game-Transport%20Fever%202-4f8c3c) ![Lua](https://img.shields.io/badge/Lua-5.3-2c2d72) ![Version](https://img.shields.io/badge/Version-1.3.4-blue) ![Status](https://img.shields.io/badge/Status-Active-brightgreen)
+![TF2](https://img.shields.io/badge/Game-Transport%20Fever%202-4f8c3c) ![Lua](https://img.shields.io/badge/Lua-5.3-2c2d72?logo=lua&logoColor=white) ![Version](https://img.shields.io/badge/Version-1.3.4-blue) ![Status](https://img.shields.io/badge/Status-Active-brightgreen)
 
 </div>
 
