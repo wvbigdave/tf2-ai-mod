@@ -6136,7 +6136,8 @@ local function repayLoan(account)
 		--trace("Aborting repay load as there are outstanding items")
 		--return 
 	end
-	local effectiveBalance = account.balance - util.scheduledBudget
+	-- Only repay with cash above the reserve, so we never drain working capital.
+	local effectiveBalance = account.balance - util.scheduledBudget - util.cashReserve
 	if account.loan > 0 and effectiveBalance > 0 then 
 		local amountToRepay = math.min(account.loan, effectiveBalance)
 		trace("Attempting to pay off",amountToRepay)
@@ -6537,7 +6538,8 @@ function evaluation.evaluateBestNewConnection()
 	local thresholdBalanceForNewCargoLink = baseParams.thresholdBalanceForNewCargoLink
 	local minBalance = math.min(thresholdBalanceForNewCargoLink, thresholdBalanceForNewPassengerLink)
 	local amountToBorrow = math.min(account.maximumLoan - account.loan, 2*minBalance)
-	local maximumAvailableBalance = balance + (account.maximumLoan - account.loan) - util.overdueBudget
+	-- Cash-only budget: never count loan headroom as spendable, never borrow.
+	local maximumAvailableBalance = balance - util.overdueBudget
 	trace("evaluateBestNewConnection: got minBalance, maximumAvailableBalance=",maximumAvailableBalance, " balance was",account.balance," scheduledBudget was",util.scheduledBudget,"overdueBudget=",util.overdueBudget)
 	local function budgetCheck(result, distance)
 		result.targetThroughput = result.initialTargetLineRate
@@ -6564,20 +6566,9 @@ function evaluation.evaluateBestNewConnection()
 	end
 	
 	local function borrow() 	
-		if amountToBorrow < 100000 then 
-			trace("Not borrowing due to low threshold",amountToBorrow)
-			return 
-		end
-		local journalEntry = api.type.JournalEntry.new() 
-		journalEntry.time = -1 -- otherwise crash to desktop !!! 
-		journalEntry.amount =  amountToBorrow 	 
-		journalEntry.category.type = api.type.enum.JournalEntryType.LOAN 
-		api.cmd.sendCommand(api.cmd.make.bookJournalEntry(api.engine.util.getPlayer(), journalEntry), function(res, success) 
-			trace("Result of call was to bookJournalEntry to borrow was",success)
-			if success then -- hmm cant just add the work back here as caller is expecting something... ok wait till next cycle
-				--evaluation.addWork(evaluateBestNewConnection)
-			end 
-		end)
+		-- DISABLED (Dave 2026-09-05): never pull loans. Only build with cash.
+		trace("borrow: loan requests disabled - only spending cash (amountToBorrow was",amountToBorrow,")")
+		return
 	end 
 	
 	if balance < minBalance then 

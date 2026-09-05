@@ -16,19 +16,17 @@
 
 local M = {}
 
--- FORCE 4X SPEED: Override game.interface.setGameSpeed to always use 4
-local originalSetGameSpeed = nil
-local function forceGameSpeed4x()
-    if game and game.interface and game.interface.setGameSpeed and not originalSetGameSpeed then
-        originalSetGameSpeed = game.interface.setGameSpeed
-        game.interface.setGameSpeed = function(speed)
-            -- Always set to 4x, never allow pause (0) or slow speeds
-            if speed == 0 then
-                -- Someone tried to pause - ignore it
-                return
-            end
-            originalSetGameSpeed(4)
-        end
+-- DEFAULT 4X ONCE: set 4x when the mod first initializes, then respect the
+-- player's own speed changes (pause/slow/fast) afterwards.
+local speedInitDone = false
+local function ensureDefaultSpeed4x()
+    if speedInitDone then return end
+    if api and api.cmd and game and game.interface and game.interface.setGameSpeed then
+        speedInitDone = true
+        pcall(function()
+            api.cmd.sendCommand(api.cmd.make.setGameSpeed(4))
+        end)
+        log("DEFAULT_SPEED: initialized to 4x once; player speed changes now respected")
     end
 end
 
@@ -667,23 +665,21 @@ handlers.diff_state = function(params)
 end
 
 handlers.pause = function(params)
-    -- IGNORE pause - always stay at 4x
-    log("IGNORING pause command - staying at 4x")
-    api.cmd.sendCommand(api.cmd.make.setGameSpeed(4))
-    return {status = "ok", message = "Ignored - game stays at 4x"}
+    api.cmd.sendCommand(api.cmd.make.setGameSpeed(0))
+    return {status = "ok"}
 end
 
 handlers.resume = function(params)
-    -- Always resume to 4x
     api.cmd.sendCommand(api.cmd.make.setGameSpeed(4))
     return {status = "ok"}
 end
 
 handlers.set_speed = function(params)
-    -- Always set to 4x regardless of request
-    log("SET_SPEED: Forcing 4x (requested: " .. tostring(params and params.speed) .. ")")
-    api.cmd.sendCommand(api.cmd.make.setGameSpeed(4))
-    return {status = "ok"}
+    local s = tonumber(params and params.speed) or 4
+    s = math.max(0, math.min(4, s))
+    log("SET_SPEED: setting to " .. tostring(s))
+    api.cmd.sendCommand(api.cmd.make.setGameSpeed(s))
+    return {status = "ok", data = {speed = tostring(s)}}
 end
 
 -- Query terrain height at a position (water is below 0)
@@ -2248,8 +2244,8 @@ end
 
 -- Poll for commands and process them
 function M.poll()
-    -- Ensure game speed override is active
-    forceGameSpeed4x()
+    -- Set 4x once on first tick, then respect player speed changes
+    ensureDefaultSpeed4x()
 
     local j = get_json()
     if not j then
@@ -2290,13 +2286,7 @@ function M.poll()
     local handler = handlers[cmd.cmd]
     local resp
 
-    -- ALWAYS ensure game is at 4x speed before executing any command
-    if api and api.cmd then
-        pcall(function()
-            api.cmd.sendCommand(api.cmd.make.setGameSpeed(4))
-        end)
-        log("SET_SPEED: 4x")
-    end
+    -- NOTE: no forced game speed here - player speed changes are respected.
 
     if handler then
         log("EXEC: " .. tostring(cmd.cmd))

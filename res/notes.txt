@@ -1,4 +1,0 @@
-100m of tunnel at 150m depth cost 1448047 for small street (1.77x)
-100m of tunnel at 100m depth cost 815062 for small street (2.53x)
-100m of tunnel at 50m depth cost 322045 for small street (2.01x)
-100m of tunnel at 25m depth cost 160117 for small street 

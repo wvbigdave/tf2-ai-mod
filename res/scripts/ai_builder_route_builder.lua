@@ -5379,6 +5379,19 @@ function routeBuilder.buildRoute(nodepair, params, callback)
 	trace("begin build route between nodes ",  nodepair[1], nodepair[2])
 	profiler.beginFunction("routeBuilder.buildRoute")
 	local startTime = os.clock()
+	-- Guard: nodes may have been removed by a previous build/deconflict
+	-- (e.g. double-track or straighten replaced an edge). Bail gracefully
+	-- instead of hard-erroring in distBetweenNodes.
+	if not nodepair or not nodepair[1] or not nodepair[2] then
+		trace("buildRoute: nil nodepair, aborting")
+		if callback then callback(nil, false) end
+		return
+	end
+	if not api.engine.entityExists(nodepair[1]) or not api.engine.entityExists(nodepair[2]) then
+		trace("buildRoute: node no longer exists (", nodepair[1], nodepair[2], ") aborting gracefully")
+		if callback then callback(nil, false) end
+		return
+	end
 	if params.isTrack then 	
 		routeBuilder.checkAndRemoveDepot(nodepair[1]) 
 		routeBuilder.checkAndRemoveDepot(nodepair[2])  
@@ -6006,7 +6019,6 @@ local function tryUpgradeToDoubleTrack(routeInfo, callback, params)
 			
 			 
 			trace("found three connected edges at node ",node," index ", indexFromStart)
-			local depotEdgeId = findDepotEdge(connectedEdges, routeInfo, i, node, routeEdges)
 			local depotEdge = util.getEdge(depotEdgeId)
 			local p1 = util.nodePos(depotEdge.node0)
 			local p2 = util.nodePos(depotEdge.node1)
@@ -7791,7 +7803,7 @@ function routeBuilder.checkForTrackupgrades(line, callback, params, lineDepots)
 		if success then 
 			callbackCount = callbackCount + 1
 			if callbackCount == expectedCallbacks then 
-				callback(res, succes)
+				callback(res, success)
 			end
 		else 
 			callback(res, success)

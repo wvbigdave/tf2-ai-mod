@@ -3861,6 +3861,14 @@ function constructionUtil.checkStationForUpgrades(stationId, params)
 		constructionUtil.checkRailStationForUpgrades(stationId,constructionId ,construction,params)
 		return 
 	end
+	if construction.fileName == "station/street/modular_terminal.con" and params.doubleTerminalUpgrade then
+		-- Fix (community-reported): road stations never got a free terminal for
+		-- double-terminal upgrades; reuse the existing road-station upgrade.
+		if util.countFreeTerminalsForStation(stationId) == 0 then
+			constructionUtil.upgradeRoadStation(nil, stationId, true, false, true)
+		end
+		return
+	end
 	if construction.fileName == "station/street/modular_terminal.con" and params.tramTrackType>0 then 
 		constructionUtil.checkBusStationForUpgradeTramOnly(stationId) 
 		return

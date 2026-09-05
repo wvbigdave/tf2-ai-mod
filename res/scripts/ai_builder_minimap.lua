@@ -871,6 +871,13 @@ function minimap.refreshMap(outerLayout, guiState)
 	local camera = api.gui.util.getGameUI():getMainRendererComponent():getCameraController()
 	local lastCameraData
 	local targetLength =   (8*lineSize) / mapScale
+	-- Camera view circle scaling (was missing upstream -> "attempt to perform
+	-- arithmetic on global 'circleScale'" crash whenever the minimap opened).
+	-- circleScale maps camera height (z) to a viewport radius in world units;
+	-- min/max clamp the circle to a sane range for any map size.
+	local circleScale = 0.5
+	local minRadius = 50
+	local maxRadius = math.max(mapBoundary.x, mapBoundary.y) / 2
     guiState.connection = scrollArea:onStep(function()
         -- Agent polling enabled with 100ms timeout - polls every 500ms via rate limiting
         local agent = require "ai_builder_agent"

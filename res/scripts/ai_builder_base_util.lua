@@ -552,8 +552,8 @@ end
 
 function util.getNode(node) 
 	if not api.engine.entityExists(node) then 
-		print(debug.traceback())
-		error("Could not find node"..node) -- because the error in the api does not print stack trace 
+		-- Defensive: return nil (callers use pcall/guard) instead of hard error
+		return nil
 	end 
 	return util.getComponent(node, api.type.ComponentType.BASE_NODE)
 end
@@ -6531,18 +6531,18 @@ end
 
 util.scheduledBudget = 0
 util.overdueBudget = 0 
+-- Cash reserve the AI never spends below; the AI never borrows.
+util.cashReserve = 1000000
 
 function util.getAvailableBalance()
+	-- Cash only: loan headroom is NEVER counted as spendable budget.
 	local playerEntity = game.interface.getEntity(game.interface.getPlayer())
 	local balance = playerEntity.balance 
-	local loan = playerEntity.loan
-	local maxLoan = util.getMaxLoan()
-	local availbleLoan = maxLoan-loan 
-	return balance + availbleLoan
+	return balance
 end 
 
 function util.getAvailableBudget() 
-	return util.getAvailableBalance()- util.scheduledBudget
+	return util.getAvailableBalance()- util.scheduledBudget - util.cashReserve
 end 
 
 function util.isDoubleDeadEndEdge(edgeId) 
@@ -6554,24 +6554,12 @@ function util.ensureBudget(amount)
 	trace("Processing request to ensure budget for",amount)
 	local playerEntity = game.interface.getEntity(game.interface.getPlayer())
 	local balance = playerEntity.balance 
-	local loan = playerEntity.loan
-	if amount > balance then 
-		local difference = amount - balance 
-		difference = 500000*math.ceil(difference/500000) -- try to borrow in the same increments as the user
-		local maxLoan = util.getMaxLoan()
-		local availableLoan = maxLoan-loan 
-		local actualLoan = math.min(difference, availableLoan)
-		trace("Attempting to borrow the difference",difference," from availableLoan",availableLoan," will borrow",actualLoan," unrounded difference is",(amount - balance)) 
-		local journalEntry = api.type.JournalEntry.new() 
-		journalEntry.time = -1 -- otherwise crash to desktop !!! 
-		journalEntry.amount =  math.floor(actualLoan) -- needs to be an int
-		journalEntry.category.type = api.type.enum.JournalEntryType.LOAN 
-		api.cmd.sendCommand(api.cmd.make.bookJournalEntry(api.engine.util.getPlayer(), journalEntry), function(res, success) 
-			trace("ensureBudget: Result of call was to bookJournalEntry to borrow was",success)
-		end)
-	else 
-		trace("Balance was sufficient")
-	end	
+	if amount > balance - util.cashReserve then 
+		trace("ensureBudget: insufficient cash (balance=",balance," reserve=",util.cashReserve,") - NOT borrowing, skipping purchase")
+		return false
+	end 
+	trace("Balance was sufficient")
+	return true
 end 
 
 function util.hugeCircle() 

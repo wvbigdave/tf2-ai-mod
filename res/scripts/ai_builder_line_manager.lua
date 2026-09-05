@@ -1748,6 +1748,13 @@ function lineManager.estimateInitialConsist(params, distance, stations)
 		params.constrainVehicleBudget = false
 		estimate = vehicleUtil.estimateThroughputPerConsist(distance, targetLineRate, params)
 	end
+	-- Fix (community-reported): even without budget constraints the consist can
+	-- stay empty (e.g. no wagon matches the cargo in this climate/era). Guard
+	-- against arithmetic on nil totalCapacity and division by zero.
+	if not estimate.totalCapacity or not estimate.throughput or estimate.throughput == 0 then
+		estimate.totalCapacity = estimate.totalCapacity or 100
+		estimate.throughput = estimate.throughput or 1
+	end
 	local targetCapacity = estimate.totalCapacity * (targetLineRate/estimate.throughput)
 	trace("Estimated throuput per consist, time taken was ",os.clock()-begin, " targetLineRate was ",targetLineRate, " throughput =",estimate.throughput)
 	if estimate.isMaxLength and params.isDoubleTrack or estimate.throughput < 0.75*targetLineRate then 
@@ -3078,6 +3085,9 @@ function lineManager.addDoubleTerminalsToLine(lineId)
 					end 
 				end
 			else 
+				-- Fix (community-reported): 'station' was only declared inside
+				-- the rail branch, so road lines crashed with nil station.
+				local station = stationFromStop(stop)
 				terminalToUse  = getFreeTerminalsForStation(station)[1]
 			end 			
 			if terminalToUse then 
@@ -3193,7 +3203,7 @@ local function makeLineDisplay(lineId)
 	if not lineName then 
 		lineName = "<unknown>"
 	end 
-	boxLayout:addItem(api.gui.comp.TextView.new(_(lineName)))
+	boxLayout:addItem(api.gui.comp.TextView.new(_(lineName) or lineName))
 	local comp= api.gui.comp.Component.new("")
 	comp:setLayout(boxLayout)
 	return comp
@@ -5864,6 +5874,18 @@ function lineManager.checkLinesAndUpdate(param, reportFn)
 			end 
 		end
 	end	
+
+	-- ROI-driven corridor upgrades: once per game year, when cash is healthy,
+	-- add double-track/parallel capacity to the busiest shared corridors and
+	-- upgrade the busiest lines automatically (best ROI first).
+	if not lineManager.lastCorridorUpgradeTime or (currentTime - lineManager.lastCorridorUpgradeTime) > oneYear then
+		if util.getAvailableBudget() > 1000000 then
+			lineManager.lastCorridorUpgradeTime = currentTime
+			trace("checkLinesAndUpdate: running corridor upgrade sweep (best-ROI)")
+			xpcall(lineManager.upgradeBusiestLines, function(e) trace("upgradeBusiestLines error:", e) end)
+			xpcall(lineManager.upgradeBusiestRoadLines, function(e) trace("upgradeBusiestRoadLines error:", e) end)
+		end
+	end
 end
 function lineManager.checkAndUpdateLine(lineId, paramOverrides)
 	lineManager.getLineReport(lineId, nil, false, false, false, paramOverrides).executeUpdate()
@@ -5974,7 +5996,7 @@ local function makelocateRow(report)
 		api.gui.util.getGameUI():getMainRendererComponent():getCameraController():focus(report.lineId, false)
 	end)
 	boxLayout:addItem(button)
-	boxLayout:addItem(api.gui.comp.TextView.new(_(report.lineName)))
+	boxLayout:addItem(api.gui.comp.TextView.new(_(report.lineName) or report.lineName))
 	local comp= api.gui.comp.Component.new("")
 	comp:setLayout(boxLayout)
 	return comp
@@ -6471,6 +6493,11 @@ function lineManager.buildVehiclePanel(circle)
 		header:setText(_("Vehicle options for").." "..lineReport.lineName)
 		
 		local options = lineReport.newVehicleConfig
+		-- Guard: vehicle config can be nil after a line was rebuilt/removed
+		if not options then
+			trace("lineManager refresh: no vehicle options for line " .. tostring(lineId) .. ", skipping")
+			return
+		end
 		trace("Got ",#options," reports")
 		local count = 0
 		for i = 1, #options do

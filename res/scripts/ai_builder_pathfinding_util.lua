@@ -969,7 +969,18 @@ function pathFindingUtil.getRouteInfoFromEdges(inputEdges)
 			edge = util.getEdge(edgeId) 
 		end
 		local tn = util.getComponent(edgeId, api.type.ComponentType.TRANSPORT_NETWORK)
+		-- Stale-edge race guard: a path can reference edges that were removed by
+		-- deconflict/double-track/straighten work between pathfinding and use.
+		-- Skip such entries instead of crashing on a nil tn/tnEdge.
+		if not tn then
+			trace("getRouteInfoFromEdges: skipping edge with no TRANSPORT_NETWORK component", edgeId)
+			goto continue
+		end
 		local tnEdge = tn.edges[segOrNode.index and segOrNode.index+1 or 1]
+		if not tnEdge then
+			trace("getRouteInfoFromEdges: skipping edge with nil tnEdge", edgeId, "index", segOrNode.index)
+			goto continue
+		end
 		local speedLimit = math.min(tnEdge.speedLimit, tnEdge.curveSpeedLimit)
 		table.insert(speedLimits,speedLimit )
 		local geometry = tnEdge.geometry
@@ -992,6 +1003,11 @@ function pathFindingUtil.getRouteInfoFromEdges(inputEdges)
 			table.insert(edges, edge)
 			table.insert(edgesAndIds, {id=edgeId, edge=edge, speedLimit=speedLimit})
 		end
+		::continue::
+	end
+	if #edgesAndIds == 0 then
+		trace("getRouteInfoFromEdges: no usable edges remain after stale-edge skip, returning nil")
+		return nil
 	end
 	if not lastFreeEdge  then
 		lastFreeEdge = #edges
@@ -1461,7 +1477,14 @@ local function getRouteLengthOfPath(path)
 	if type(path[1])=="number" then --water "path"
 		return util.distBetweenConstructions(path[1], path[2])
 	end 	
-	return pathFindingUtil.getRouteInfoFromEdges(path).routeLength
+	local routeInfo = pathFindingUtil.getRouteInfoFromEdges(path)
+	if not routeInfo then
+		-- stale/missing edges: report a very large length so this stop is
+		-- ranked last rather than crashing on a nil index
+		trace("getRouteLengthOfPath: no route info (stale edges), returning huge length")
+		return math.huge
+	end
+	return routeInfo.routeLength
 
 end 
 function pathFindingUtil.getAllEdgesUsedByLines(filterFn)
