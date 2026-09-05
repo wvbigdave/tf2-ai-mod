@@ -526,6 +526,13 @@ function util.clearCacheNode2SegMaps()
 end
 
 function util.getComponent(entity, componentType)
+	-- Stale/nil entity guard: a caller can hand us a line/edge id that was
+	-- deleted since it was cached (e.g. vehicle panel "Show more" after the
+	-- autonomous loop rebuilt a line). api.engine.getComponent(nil, ...) raises
+	-- a sol "expected number, received nil" that poisons the whole UI update.
+	if entity == nil or not api.engine.entityExists(entity) then 
+		return nil 
+	end
 	if util.componentCache == nil then 
 		util.componentCache = {}
 	end 

@@ -160,11 +160,16 @@ local function isAirLine(line)
 end
 
 local function lineName(lineId) 
-	return util.getComponent(lineId, api.type.ComponentType.NAME).name
+	local n = util.getComponent(lineId, api.type.ComponentType.NAME)
+	return n and n.name or ("Line "..tostring(lineId))
 end
 
 local function stationFromGroup(group) 
-	return util.getComponent(group, api.type.ComponentType.STATION_GROUP).stations[1]
+	local g = util.getComponent(group, api.type.ComponentType.STATION_GROUP)
+	if not g or not g.stations or #g.stations == 0 then 
+		return nil
+	end
+	return g.stations[1]
 end
 local function stationFromConstruction(constructionId) 
 	local construction = util.getComponent(constructionId, api.type.ComponentType.CONSTRUCTION)
@@ -831,7 +836,12 @@ local function discoverLineCargoType2(lineId, forbidRecurse)
 		trace("line has insufficient stops to discoverCargoType")
 		return 
 	end
-	local firstStation = stationFromStop(getLine(lineId).stops[1])
+	local lineStops = getLine(lineId).stops
+	if not lineStops then 
+		trace("discoverCargoType: line gone, returning")
+		return
+	end
+	local firstStation = stationFromStop(lineStops[1])
 	if not firstStation then 
 		trace("No first station for line?")
 		debugPrint(getLine(lineId))
@@ -864,7 +874,7 @@ local function discoverLineCargoType2(lineId, forbidRecurse)
 	local industry = util.searchForFirstEntity(util.getStationPosition(firstStation), 300, "SIM_BUILDING")
 	
 	local cargoType = industry and  util.discoverCargoType(industry) 
-	local station2 = stationFromStop(getLine(lineId).stops[2])
+	local station2 = stationFromStop(lineStops[2])
 	if not cargoType then 
 		trace("Attempting to find from industry2")
 		local industry2 = util.searchForFirstEntity(util.getStationPosition(station2), 300, "SIM_BUILDING")
@@ -1283,7 +1293,7 @@ local function getLineParams(lineId)
 		trace("Setting useAutoLoadConfig to true for ",lineId)
 	end 
 	params.lineId = lineId
-	params.lineName = util.getComponent(lineId, api.type.ComponentType.NAME).name
+	params.lineName = lineName(lineId)
 	params.isElectricTrack = isElectricRailLine(line)
 	params.line = line
 	if isRailLine(line) then 
@@ -1881,11 +1891,13 @@ function lineManager.createNewTrainLineBetweenStations(stations, params, callbac
  
 	local lineName 
 	if params.cargoType == "PASSENGERS" then
-		local townName = util.getComponent(station1, api.type.ComponentType.NAME).name
+		local townNameComp = util.getComponent(station1, api.type.ComponentType.NAME)
+		local townName = townNameComp and townNameComp.name or _("Town")
 		if not suffix then suffix = _("Express") end
 		lineName = townName.." "..suffix
 	else 
-		local stationName = util.getComponent(station1, api.type.ComponentType.NAME).name
+		local stationNameComp = util.getComponent(station1, api.type.ComponentType.NAME)
+		local stationName = stationNameComp and stationNameComp.name or _("Station")
 		lineName = stationName.." "..util.getUserCargoName(params.cargoType)
 	end
 	params.lineName = lineName
@@ -4779,6 +4791,10 @@ function lineManager.getLineReport(lineId, line, isForVehicleReport, useRouteInf
 	if not line then 
 		line = util.getComponent(lineId, api.type.ComponentType.LINE)
 	end
+	if not line then 
+		trace("getLineReport: line no longer exists, returning nil for lineId=",lineId)
+		return nil
+	end
 	local oneMinute = 60875
 	local report = {} 
 	local params = getLineParams(lineId)
@@ -5130,6 +5146,9 @@ function lineManager.getLineReport(lineId, line, isForVehicleReport, useRouteInf
 	
 	
 	local account = util.getComponent(lineId, api.type.ComponentType.ACCOUNT)
+	if not account then 
+		trace("getLineReport: no account for lineId=",lineId,", skipping journal analysis")
+	end
 	
 	-- util.getComponent(151074, api.type.ComponentType.LOG_BOOK) TODO what can this tell us name2log.itemsTransported.
 	
@@ -5138,6 +5157,7 @@ function lineManager.getLineReport(lineId, line, isForVehicleReport, useRouteInf
 	report.income = 0 
 	report.maintenance = 0
 	local totalOneYear = 0
+	if account then 
 	for i = #account.journal, 1, -1 do 
 		local journal = account.journal[i]
 		if now-journal.time <= 12*oneMinute then 
@@ -5154,6 +5174,7 @@ function lineManager.getLineReport(lineId, line, isForVehicleReport, useRouteInf
 		elseif journal.category.type ==   api.type.enum.JournalEntryType.MAINTENANCE then
 			report.maintenance = report.maintenance + journal.amount 
 		end 
+	end
 	end
 	trace("Total amount for line", lineId," was calculated as",total)
 	report.profit = total
@@ -5767,6 +5788,10 @@ function lineManager.getLinesReport(limit, circle, filterFn, paramOverrides)
 			profiler.beginFunction("lineManager.getLineReport")
 			local lineReport = lineManager.getLineReport(lineId, line, false, false, false, paramOverrides)
 			profiler.endFunction("lineManager.getLineReport")
+			if not lineReport then 
+				trace("collectLines: line gone mid-report, skipping",lineId)
+				goto continue
+			end
 			trace("Got reports, time taken was ",(os.clock()-beginLineReport), " for ",lineId, " ", lineReport.lineName, " reportsCollected=",#reports)
 			if not lineReport.isOk and util.size(lineReport.recommendations) > 0 then 
 				count = count + 1
@@ -5776,7 +5801,8 @@ function lineManager.getLinesReport(limit, circle, filterFn, paramOverrides)
 				break 
 			end
 		end
-		 
+		::continue::
+	 
 	end
 	lineManager.cargoSourceMap = nil
 	trace("Got reports, time taken was ",(os.clock()-begin))
@@ -5888,7 +5914,10 @@ function lineManager.checkLinesAndUpdate(param, reportFn)
 	end
 end
 function lineManager.checkAndUpdateLine(lineId, paramOverrides)
-	lineManager.getLineReport(lineId, nil, false, false, false, paramOverrides).executeUpdate()
+	local report = lineManager.getLineReport(lineId, nil, false, false, false, paramOverrides)
+	if report then 
+		report.executeUpdate()
+	end
 end
 
 function lineManager.buildVehicleFilterPanel() 
@@ -6097,6 +6126,11 @@ function lineManager.buildLineDisplayTable(callbackFn)
 			local line = util.getComponent(lineId, api.type.ComponentType.LINE)
 			local isForVehicleReport = false
 			local report = lineManager.getLineReport(lineId, line, isForVehicleReport, false, true)
+			-- Guard: line deleted between list refresh and row build -> skip it
+			if not report then 
+				trace("buildLineDisplayTable: skipping deleted line",lineId)
+				goto continue
+			end
 			local button = util.newButton("Analyze","ui/icons/game-menu/help@2x.tga")
 			table.insert(allButtons, button)
 			if lineId  == currentLineId then 
@@ -6127,6 +6161,7 @@ function lineManager.buildLineDisplayTable(callbackFn)
 				vehicleUtil.displayVehicleConfig(report.currentVehicleConfig),
 				button,
 			})
+			::continue::
 		end
 		trace("The report found ", count, " lines needing attention")
 		displayTable:setVisible( #linesToReport > 0, false)
@@ -6490,6 +6525,13 @@ function lineManager.buildVehiclePanel(circle)
 		local paramOverrides = paramOverridesChooser.customOptions
 		local lineReport = lineManager.getLineReport(lineId, nil, isForVehicleReport, useRouteInfo, displayOnly, paramOverrides )
 		--local lineReport = lineManager.getLineReport(lineId, nil, true)
+		-- Guard: no line selected yet, or the line was rebuilt/removed by the
+		-- autonomous loop -> show a friendly message instead of a nil crash.
+		if not lineReport then
+			trace("lineManager refresh: no line report for lineId=", lineId, " (nil lineId or deleted line)")
+			header:setText(_("Select a line to see vehicle options"))
+			return
+		end
 		header:setText(_("Vehicle options for").." "..lineReport.lineName)
 		
 		local options = lineReport.newVehicleConfig
@@ -6558,15 +6600,21 @@ function lineManager.buildVehiclePanel(circle)
 		for i, lineId in pairs(allLines) do 
 			
 			local line = util.getComponent(lineId, api.type.ComponentType.LINE)
+			if not line then 
+				trace("refreshCombobox: skipping deleted line",lineId)
+				goto continue
+			end
 			if isRailLine(line) or true then 
 				count = count + 1
-				local name = util.getComponent(lineId, api.type.ComponentType.NAME).name
+				local nameComp = util.getComponent(lineId, api.type.ComponentType.NAME)
+				local name = nameComp and nameComp.name or ("Line "..lineId)
 			 
 				table.insert(linesLookup, lineId)
 				if count >= 5 then 
 					break 
 				end
 			end
+			::continue::
 		end
 		lineDisplayTable.refresh(linesLookup)
 	end

@@ -247,37 +247,6 @@ local function err(x)
 	end
 end
 util.err = err
-
--- Show a clear, user-facing message in the AI Builder error panel (with a
--- matching trace line) instead of building something half-finished.
-local function displayUiError(message)
-	errorMessage = message
-	trace("UI ERROR: ", message)
-	if errorPanel then 
-		errorPanel:setText(message) 
-		clearErrorButton:setVisible(true,false)
-	end 
-end
-
--- Funds pre-check for USER-INITIATED builds from the AI Builder interface.
--- Returns true if we can afford to reliably start the requested system, and
--- shows a specific "not enough funds" message + aborts (false) otherwise.
--- NOTE: this only runs for manual interface actions; the autonomous loop has
--- its own budget throttling inside evaluateBestNewConnection.
-local function checkBudgetForUiAction(actionLabel, minCost)
-	local balance = util.getAvailableBalance()
-	local reserve = util.cashReserve or 1000000
-	local spendable = balance - reserve
-	if spendable < (minCost or 200000) then
-		local needed = minCost or 200000
-		local formattedBalance = api.util and api.util.formatNumber and api.util.formatNumber(balance) or tostring(math.floor(balance))
-		local formattedNeeded = api.util and api.util.formatNumber and api.util.formatNumber(needed) or tostring(math.floor(needed))
-		displayUiError(_("Not enough funds to reliably create the ")..actionLabel.._(". You have ")..formattedBalance.._(" but need at least ")..formattedNeeded.._(". Build up your balance and try again."))
-		return false
-	end
-	return true
-end
-
 local function debuglog(...) 
 	if isdebuglog then 
 		print(...)
@@ -6042,38 +6011,6 @@ function data()
 			if f then
 				f:write(os.date("%H:%M:%S") .. " EVENT src=" .. tostring(src) .. " id=" .. tostring(id) .. "\n")
 				f:close()
-			end
-
-			-- Funds gate for USER-INITIATED interface builds: if the player asks
-			-- the AI Builder to create a new system (bus network, road, rail,
-			-- water, air, upgrades, straighten) but there is not enough cash to
-			-- reliably complete it, say so clearly and STOP - never start a
-			-- half-finished build that then errors out mid-way.
-			-- NOTE: developStationOffside and the aiEnableOptions/auto events are
-			-- NOT gated (the autonomous loop fires those itself).
-			local uiActionFunds = {
-				buildNewTownBusStop = { _("bus network"), 200000 },
-				buildNewIndustryRoadConnection = { _("road connection"), 300000 },
-				buildIndustryRoadConnectionEval = { _("road connection"), 300000 },
-				buildIndustryRailConnection = { _("rail connection"), 500000 },
-				buildNewPassengerTrainConnections = { _("passenger train connection"), 500000 },
-				buildNewTownRoadConnection = { _("road connection"), 300000 },
-				buildNewWaterConnections = { _("water connection"), 300000 },
-				buildNewPassengerWaterConnections = { _("water connection"), 300000 },
-				buildNewAirConnections = { _("air connection"), 1000000 },
-				buildNewIndustryAirConnection = { _("air connection"), 1000000 },
-				buildCompleteRoute = { _("complete route"), 1000000 },
-				buildMultiStopCargoRoute = { _("multi-stop cargo route"), 500000 },
-				connectTowns = { _("town connection"), 300000 },
-				addBusLanes = { _("bus lane upgrade"), 100000 },
-				repositionBusStops = { _("bus stop relocation"), 50000 },
-				doStraighten = { _("track straightening"), 100000 },
-			}
-			local action = uiActionFunds[id]
-			if action and not (param and param.isAutoBuildMode) then
-				if not checkBudgetForUiAction(action[1], action[2]) then
-					return
-				end
 			end
 
 			-- Accept events from ai_builder_script OR from any source if id matches known commands

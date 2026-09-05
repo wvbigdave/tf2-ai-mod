@@ -8476,12 +8476,10 @@ local function checkAndValidateRoadNode(node, vector)
 			trace("checkAndValidateRoadNode: inspecting",otherNode," as an alternative for ",node,"has path?",hasPath,"angleToVector=",math.deg(angleToVector),"isOneWay=",isOneWay)
 			if hasPath and angleToVector < math.rad(90) and not isOneWay then 
 				trace("Considering node",otherNode,"as an alternative to ",node)
-				local routeInfoForAlt = pathFindingUtil.getRouteInfoFromEdges(roadPath)
-				local routeLenForAlt = routeInfoForAlt and routeInfoForAlt.routeLength or math.huge
 				table.insert(options, {
 					node = otherNode, 
 					scores = {
-						routeLenForAlt, 
+						pathFindingUtil.getRouteInfoFromEdges(roadPath).routeLength, 
 						angleToVector,
 					}					
 				})
