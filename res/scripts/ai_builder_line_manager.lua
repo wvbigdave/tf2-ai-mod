@@ -832,14 +832,14 @@ local function discoverLineCargoType2(lineId, forbidRecurse)
 	if #api.engine.system.simPersonSystem.getSimPersonsForLine(lineId) > 0 then 
 		return api.res.cargoTypeRep.find("PASSENGERS")
 	end
-	if #getLine(lineId).stops < 2 then 
-		trace("line has insufficient stops to discoverCargoType")
-		return 
-	end
 	local lineStops = getLine(lineId).stops
 	if not lineStops then 
 		trace("discoverCargoType: line gone, returning")
 		return
+	end
+	if #lineStops < 2 then 
+		trace("line has insufficient stops to discoverCargoType")
+		return 
 	end
 	local firstStation = stationFromStop(lineStops[1])
 	if not firstStation then 
@@ -3620,7 +3620,8 @@ function lineManager.createNewLine(stations, callback, name, params)
 		local otherLineId = util.areStationsConnectedWithLine(stations[1], stations[2]) 
 		local vehicleCount = #api.engine.system.transportVehicleSystem.getLineVehicles(otherLineId)
 		local lastUpdateTime = lineManager.lineLastUpdateTime[otherLineId]
-		local otherLineStopCount = #getLine(otherLineId).stops
+		local otherLine = getLine(otherLineId)
+		local otherLineStopCount = otherLine and #otherLine.stops or 0
 		local canAccept= vehicleCount == 0 and (not lastUpdateTime or (game.interface.getGameTime().time - lastUpdateTime > 600)) and otherLineStopCount ==2 
 		
 		trace("Discovered a line that already connects ",stations[1], stations[2], " otherLineId=",otherLineId,"vehicleCount=",vehicleCount,"lastUpdateTime=",lastUpdateTime,"otherLineStopCount=",otherLineStopCount, " canAccept?",canAccept)
@@ -3973,7 +3974,8 @@ function lineManager.createLineAndAssignVechicles(vehicleConfig, stations, lineN
 end
 
 function lineManager.setupBusLine(vehicleConfig, mainStation, station, numberOfBusses, prefix)
-	local lineName = util.getComponent(station, api.type.ComponentType.NAME).name
+	local stationNameComp = util.getComponent(station, api.type.ComponentType.NAME)
+	local lineName = stationNameComp and stationNameComp.name or _("Bus Line")
 	if prefix then 
 		lineName = _(prefix).." "..lineName 
 	end 
@@ -4275,12 +4277,15 @@ function lineManager.findLineConnectingStations(station1, station2)
 end
 function lineManager.getSourceStationForTruckStop(truckStop)
 	for i, lineId in pairs(api.engine.system.lineSystem.getLineStopsForStation(truckStop)) do 
-		for j, stop in pairs(getLine(lineId).stops) do 
+		local line = getLine(lineId)
+		if line then 
+		for j, stop in pairs(line.stops) do 
 			local station = stationFromStop(stop) 
 			if api.engine.system.streetConnectorSystem.getConstructionEntityForStation(station) ~= -1 then 
 				return station 
 			end
 		end 
+		end
 	end 
 end
 function lineManager.setupTownBusNetwork(   stationConstr, town, prefix )
