@@ -999,6 +999,9 @@ handlers.enable_auto_build = function(params)
         if params.ships ~= nil then options.autoEnableShipFreight = params.ships end
         if params.full ~= nil then options.autoEnableFullManagement = params.full end
     end
+    -- Explicitly re-enable the master automation switch (a user who toggled
+    -- AI off in-game is deliberately handing control back when sending this).
+    options.autoEnabled = true
 
     api.cmd.sendCommand(api.cmd.make.sendScriptEvent(
         "ai_builder_script",
@@ -1025,6 +1028,7 @@ handlers.disable_auto_build = function(params)
         autoEnableFullManagement = false,
         autoEnableExpandingBusCoverage = false,
         autoEnableExpandingCargoCoverage = false,
+        autoEnabled = false,
     }
 
     api.cmd.sendCommand(api.cmd.make.sendScriptEvent(

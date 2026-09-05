@@ -178,6 +178,10 @@ local aiEnableOptions = {
 	autoEnableFullManagement = false,
 	autoEnableExpandingBusCoverage = false,
 	autoEnableExpandingCargoCoverage = false,
+	-- Master switch: gates ALL autonomous work (autoBuild, line management,
+	-- coverage expansion, corridor upgrades). User toggles it in-game so they
+	-- can take manual control and let the AI resume from their work later.
+	autoEnabled = true,
 }
 
 local guiState = {}
@@ -247,6 +251,37 @@ local function err(x)
 	end
 end
 util.err = err
+
+-- Show a clear, user-facing message in the AI Builder error panel (with a
+-- matching trace line) instead of building something half-finished.
+local function displayUiError(message)
+	errorMessage = message
+	trace("UI ERROR: ", message)
+	if errorPanel then 
+		errorPanel:setText(message) 
+		clearErrorButton:setVisible(true,false)
+	end 
+end
+
+-- Funds pre-check for USER-INITIATED builds from the AI Builder interface.
+-- Returns true if we can afford to reliably start the requested system, and
+-- shows a specific "not enough funds" message + aborts (false) otherwise.
+-- NOTE: this only runs for manual interface actions; the autonomous loop has
+-- its own budget throttling inside evaluateBestNewConnection.
+local function checkBudgetForUiAction(actionLabel, minCost)
+	local balance = util.getAvailableBalance()
+	local reserve = util.cashReserve or 1000000
+	local spendable = balance - reserve
+	if spendable < (minCost or 200000) then
+		local needed = minCost or 200000
+		local formattedBalance = api.util and api.util.formatNumber and api.util.formatNumber(balance) or tostring(math.floor(balance))
+		local formattedNeeded = api.util and api.util.formatNumber and api.util.formatNumber(needed) or tostring(math.floor(needed))
+		displayUiError(_("Not enough funds to reliably create the ")..actionLabel.._(". You have ")..formattedBalance.._(" but need at least ")..formattedNeeded.._(". Build up your balance and try again."))
+		return false
+	end
+	return true
+end
+
 local function debuglog(...) 
 	if isdebuglog then 
 		print(...)
@@ -5422,7 +5457,46 @@ local function buildWindow()
 	buttongroup:setOneButtonMustAlwaysBeSelected(true)
 	local toplayout = api.gui.layout.BoxLayout.new("HORIZONTAL");
 	toplayout:addItem(buttongroup)
-	
+	toplayout:addItem(api.gui.comp.Component.new("VerticalLine"))
+
+	-- Master AI automation toggle. Off = the AI stops ALL autonomous work
+	-- (autoBuild loop, line management, coverage expansion, corridor upgrades)
+	-- so the player can take manual control; anything they build is picked up
+	-- automatically when the AI is toggled back on.
+	local autoToggleText = api.gui.comp.TextView.new("")
+	local autoToggle = api.gui.comp.ToggleButton.new(autoToggleText)
+	local function updateAutoToggleLabel()
+		local on = aiEnableOptions.autoEnabled ~= false
+		if on then 
+			autoToggleText:setText(_("AI: ON"))
+			autoToggleText:setTooltip(_("AI automation is ON - the AI builds and manages lines automatically"))
+		else 
+			autoToggleText:setText(_("AI: OFF"))
+			autoToggleText:setTooltip(_("AI automation is OFF - manual control. Toggle on to let the AI resume from your work"))
+		end 
+		autoToggle:setSelected(on, false)
+	end
+	autoToggle:onToggle(function()
+		local nowOn = autoToggle:isSelected()
+		aiEnableOptions.autoEnabled = nowOn
+		if nowOn then 
+			errorPanel:setText(_("AI automation resumed - it will build on top of your existing network"))
+		else 
+			-- Cancel queued autonomous work so nothing builds while paused
+			workItems = {}
+			workItems2 = {}
+			backgroundWorkItems = {}
+			errorPanel:setText(_("AI automation OFF - you are in control. The AI will resume from your work when toggled back on"))
+		end 
+		clearErrorButton:setVisible(true,false)
+		updateAutoToggleLabel()
+		trace("AI automation master toggle set to ",tostring(nowOn))
+	end)
+	updateAutoToggleLabel()
+	toplayout:addItem(autoToggle)
+	guiState.autoToggle = autoToggle
+	guiState.updateAutoToggleLabel = updateAutoToggleLabel
+
 	local slider = api.gui.comp.Slider.new(true) 
 	slider:setMinimum(10)
 	slider:setMaximum(120)
@@ -5662,6 +5736,10 @@ local function autoBuild()
 	end 
 end
 local function doTriggerWork()
+	if aiEnableOptions.autoEnabled == false then 
+		trace("doTriggerWork: AI automation disabled by user (master toggle off)")
+		return
+	end
 	if util.getAvailableBudget() <= 0 then 
 		trace("Not doing any work due to lack of budget")
 	end
@@ -6013,6 +6091,38 @@ function data()
 				f:close()
 			end
 
+			-- Funds gate for USER-INITIATED interface builds: if the player asks
+			-- the AI Builder to create a new system (bus network, road, rail,
+			-- water, air, upgrades, straighten) but there is not enough cash to
+			-- reliably complete it, say so clearly and STOP - never start a
+			-- half-finished build that then errors out mid-way.
+			-- NOTE: developStationOffside and the aiEnableOptions/auto events are
+			-- NOT gated (the autonomous loop fires those itself).
+			local uiActionFunds = {
+				buildNewTownBusStop = { _("bus network"), 200000 },
+				buildNewIndustryRoadConnection = { _("road connection"), 300000 },
+				buildIndustryRoadConnectionEval = { _("road connection"), 300000 },
+				buildIndustryRailConnection = { _("rail connection"), 500000 },
+				buildNewPassengerTrainConnections = { _("passenger train connection"), 500000 },
+				buildNewTownRoadConnection = { _("road connection"), 300000 },
+				buildNewWaterConnections = { _("water connection"), 300000 },
+				buildNewPassengerWaterConnections = { _("water connection"), 300000 },
+				buildNewAirConnections = { _("air connection"), 1000000 },
+				buildNewIndustryAirConnection = { _("air connection"), 1000000 },
+				buildCompleteRoute = { _("complete route"), 1000000 },
+				buildMultiStopCargoRoute = { _("multi-stop cargo route"), 500000 },
+				connectTowns = { _("town connection"), 300000 },
+				addBusLanes = { _("bus lane upgrade"), 100000 },
+				repositionBusStops = { _("bus stop relocation"), 50000 },
+				doStraighten = { _("track straightening"), 100000 },
+			}
+			local action = uiActionFunds[id]
+			if action and not (param and param.isAutoBuildMode) then
+				if not checkBudgetForUiAction(action[1], action[2]) then
+					return
+				end
+			end
+
 			-- Accept events from ai_builder_script OR from any source if id matches known commands
 			if src == "ai_builder_script" or id == "buildNewIndustryRoadConnection" or id == "aiEnableOptions" or id == "buildIndustryRailConnection" or id == "buildIndustryRoadConnectionEval" or id == "buildNewWaterConnections" then
 
@@ -6210,7 +6320,15 @@ function data()
 				elseif id == "checkLines" then
 					checkLines(param)
 				elseif id == "aiEnableOptions" then 
+					-- Preserve the user's master toggle: an external payload that
+					-- replaces the whole table must NOT silently re-enable
+					-- automation the player switched off in-game. Only an explicit
+					-- autoEnabled field in the payload can change it.
+					local masterState = aiEnableOptions.autoEnabled ~= false -- nil → true (default on)
 					aiEnableOptions = param.aiEnableOptions
+					if aiEnableOptions.autoEnabled == nil then 
+						aiEnableOptions.autoEnabled = masterState
+					end
 					connectEval.isAutoBuildMode = true
 				elseif id == "connectTowns" then
 					addWork(function() connectTowns({{param.town1, param.town2}}, 1) end)
